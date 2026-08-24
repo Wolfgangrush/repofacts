@@ -268,7 +268,8 @@ def format_table(
     cols = ["verdict", "repo", "stars", "licence", "platform", "reason"]
     rows: list[list[str]] = []
 
-    for a in sorted(assessments, key=_verdict_sort_key):
+    sorted_assessments = sorted(assessments, key=_verdict_sort_key)
+    for a in sorted_assessments:
         rows.append([
             a.verdict,
             a.ref.full_name,
@@ -288,7 +289,6 @@ def format_table(
     out: list[str] = []
     out.append(sep.join(c.ljust(widths[i]) for i, c in enumerate(cols)))
     out.append(sep.join("-" * widths[i] for i in range(len(cols))))
-    sorted_assessments = sorted(assessments, key=_verdict_sort_key)
     for r, a in zip(rows, sorted_assessments):
         out.append(sep.join(r[i].ljust(widths[i]) for i in range(len(cols))))
         if deep_by_full is not None:
@@ -604,6 +604,7 @@ def format_json(
     partial: bool = False,
     token_source: str = "none",
     deep_by_full: Optional[dict[str, Any]] = None,
+    generated_at: Optional[str] = None,
 ) -> str:
     """JSON output.
 
@@ -675,7 +676,7 @@ def format_json(
 
     obj = {
         "version": "0.1.0",
-        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_at_utc": generated_at or datetime.now(timezone.utc).isoformat(),
         "licence_as_of_utc": licence_as_of,
         "partial": partial,
         "token_source": token_source,  # name only; never the token value

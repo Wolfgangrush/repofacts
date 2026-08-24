@@ -1,8 +1,8 @@
-"""the maintainer-authored tests for the pure decision layer.
+"""Tests for the pure decision layer.
 
-Per the model-separation rule: the review wrote the
-implementation, the maintainer writes every test. These encode real cases observed on
-2026-08-24, not invented ones.
+Per the project's model-separation rule, whoever writes the implementation does
+not write its tests. These encode real cases observed on 2026-08-24, not
+invented ones.
 """
 from __future__ import annotations
 

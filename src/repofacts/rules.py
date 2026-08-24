@@ -228,7 +228,6 @@ def _platform_conflicts_for_host(
                 if "unlike" in line.lower() or "no need for" in line.lower():
                     continue
             # Decide whether host matches.
-            conflict = False
             if label in {"CUDA", "NVIDIA", "TensorRT", "ROCm"}:
                 # We can't know about GPU availability without probing; we
                 # surface this as a note rather than a hard STOP per the
@@ -251,9 +250,6 @@ def _platform_conflicts_for_host(
                     f"line {line_index + 1}: '{line.strip()[:120]}' "
                     f"(embedded target on {host_system})"
                 )
-            # Note: we set ``conflict`` for symmetry but don't currently
-            # branch on it — every conflict is a CAUTION note, not a STOP.
-            _ = conflict
     return notes
 
 

@@ -1,7 +1,7 @@
 # 01 — PRD · repofacts
 
 **Status:** DRAFT · pre-code · 2026-08-24 14:10 IST
-**Owner:** the owner · **Build gate:** BMAD v2 · **Name locked by the owner 2026-08-24 14:04** (`an earlier candidate` rejected)
+**Owner:** the publisher · **Build gate:** BMAD v2 · **Name locked 2026-08-24** (an earlier candidate name was rejected)
 
 ## What it is
 
@@ -59,17 +59,17 @@ Every one of those was caught by a human running `gh api` by hand. That manual p
 - Install is one command with no configuration.
 - A first-time user gets a useful answer in under 30 seconds without reading docs.
 
-## SCOPE EXPANSION — authorised by the owner 2026-08-24 14:20 IST
+## SCOPE EXPANSION — authorised by the owner 2026-08-24
 
-> the owner: *"We can add these things — make it larger — add a security auditing layer — add a simulation
+> The owner: *"We can add these things — make it larger — add a security auditing layer — add a simulation
 > layer — add a quality layer… One product doing everything… How to add it to Claude Code — or — how
 > to add it to Codex — all of it, in one."* Then at 14:26: *"Both [simulation (b) and (c)] .. and go
 > full throttle."*
 
 **This is the owner deliberately reopening the banned list, not scope creep.** Recorded as a decision
-so `06-FILTER` measures against the real target. The reviewer's stated objection at the time — that
+so `06-FILTER` measures against the real target. The stated objection at the time — that
 "one product doing everything" dilutes the one-command, one-screenshot hook that made it spread —
-was heard and **overruled by the owner, which is his call.** The mitigation adopted is a **fast default
+was heard and **overruled by the owner, which is the owner's call.** The mitigation adopted is a **fast default
 with a `--deep` flag**, so the original 5-second path survives intact.
 
 ### The product is now four layers
@@ -112,8 +112,6 @@ Reduced but **not** abolished. `06-FILTER` sweeps against this list.
 
 ## Open questions for the owner
 
-- **Placement:** the AIO placement map has no row for a general (non-lawtech) developer tool.
-  Provisionally at `<repo root>/`, consistent with `onbox-rag` and
-  `newsletter-automation` precedent. **Needs ratifying, and the map needs the missing row.**
-- **Licence for the repo itself** — MIT is the obvious choice for adoption. the owner's call.
+- **Placement:** resolved in the publisher's local working tree; not a repository concern.
+- **Licence for the repo itself** — MIT is the obvious choice for adoption. The owner's call.
 - **Public or private** — BUILD ≠ PUSH. Publishing is a separate gate requiring the publication firewall.

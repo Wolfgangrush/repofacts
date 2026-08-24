@@ -18,12 +18,9 @@ LOW, INFO.
 from __future__ import annotations
 
 import re
-from datetime import datetime
-from typing import Any
 
 from .models import (
     Finding,
-    SecurityFacts,
     SecurityReport,
     SEV_HIGH,
     SEV_INFO,

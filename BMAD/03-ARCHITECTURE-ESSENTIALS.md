@@ -9,13 +9,17 @@ Takes repos an AI recommended, asks GitHub the truth, prints a verdict per repo.
 1. **No LLM inside.** Deterministic, reproducible, always.
 2. **Zero runtime dependencies.** Python 3.11+ stdlib only.
 3. **Network only in `github.py`.** `rules.py` and `claims.py` are pure → offline-testable.
+   The **clock** is captured once by `cli.py` and passed down; every module below it is a pure
+   function of the timestamp it receives. (`rules.py` keeps a `now=None` fallback for direct
+   callers; `render.py` no longer reads the clock at all.)
 4. **Never mutates anything** — no clone, no install, no writes to the user's project.
 5. **Never silently drops an input.** Skipped mentions are listed with the reason.
 6. **A false STOP is worse than a missed CAUTION.**
 
 ## Modules
 `extract` (text→refs) · `github` (API, *only* net) · `rules` (pure verdicts) ·
-`claims` (pure diff) · `render` (table/json/md) · `cli` (argparse, exit codes)
+`claims` (pure diff) · `render` (table/json/md) · `cli` (argparse, exit codes) ·
+`models` (shared dataclasses) · `security` · `quality` · `simulate` (pure deep battery)
 
 ## Flow
 `text → refs → facts (threaded) → assessments → render`
@@ -40,15 +44,15 @@ Takes repos an AI recommended, asks GitHub the truth, prints a verdict per repo.
 
 ## Hard-question pass — answers recorded here (Phase 3)
 
-Ran 2026-08-24 14:15 IST · an independent review (live-probed UP) · 12 findings.
-**10 accepted · 1 accepted-narrowed · 1 rejected with reason.** the maintainer adjudicated each; the
+Ran 2026-08-24 · independent review pass · 12 findings.
+**10 accepted · 1 accepted-narrowed · 1 rejected with reason.** Each was adjudicated on the record; the
 critique materially improved the design and two findings corrected outright errors of mine.
 
 ### ACCEPTED — design changed
 
 | # | finding | change made |
 |---|---|---|
-| 1 | stdlib `urllib` + 8 threads = no keep-alive, 8 TCP+TLS per call | **Switch to `http.client.HTTPSConnection`, one persistent connection per worker** — still stdlib, still zero-dep, but keep-alive works. Add `Accept-Encoding: gzip`, ETag/`If-None-Match`, and honour `Retry-After`. the review framed it as "pick stdlib OR concurrency" — that is a false choice; stdlib supports pooling, it just isn't in `urllib.request`. |
+| 1 | stdlib `urllib` + 8 threads = no keep-alive, 8 TCP+TLS per call | **Switch to `http.client.HTTPSConnection`, one persistent connection per worker** — still stdlib, still zero-dep, but keep-alive works. Add `Accept-Encoding: gzip`, ETag/`If-None-Match`, and honour `Retry-After`. The review framed it as "pick stdlib OR concurrency" — that is a false choice; stdlib supports pooling, it just isn't in `urllib.request`. |
 | 2 | `$GITHUB_TOKEN` first shadows a user PAT in GitHub Actions (1,000/hr vs 5,000/hr) | New order: `$REPOFACTS_TOKEN` → `$GH_TOKEN` → `$GITHUB_TOKEN` → `gh auth token`, and **warn explicitly when the Actions-provisioned token is in use**. |
 | 3 | no pre-flight budget check; run dies mid-way | **Budget gate before starting:** compare `X-RateLimit-Remaining` against `len(refs) × calls_per_ref` and refuse to start a run that cannot finish, naming the reset time. Partial-result handling stays as the fallback, not the plan. |
 | 4 | `gh auth token` can print help text to stdout and exit 0 → help text sent as a Bearer token | **Validate token shape before use.** *Corrected the review's own regex*: it proposed `^gh[ps]_…`, which misses `gho_` and `ghu_` — and `gho_` is exactly what this machine's `gh` issues. Accept `^gh[posu]_[A-Za-z0-9]{36,}$`. |
@@ -69,5 +73,5 @@ critique materially improved the design and two findings corrected outright erro
 
 | # | finding | why not |
 |---|---|---|
-| 11 | cut `--claims` from v1 entirely | **Held.** The claim-diff is the only thing that makes this more than a nicer `gh api`, and it is the demo that carries the whole tool. the review's real point — that a broad regex grammar mostly emits "not parsed" — is correct, so the feature is **narrowed to the two highest-frequency, highest-signal claims in LLM output: a star count near the mention, and an SPDX-ish licence token.** Everything else reports nothing at all rather than guessing. ~40 lines, not a grammar. If the narrowed version still mostly says "not parsed" on real input, it gets cut at `06-FILTER` — that is now a recorded falsifier, not a hope. |
+| 11 | cut `--claims` from v1 entirely | **Held.** The claim-diff is the only thing that makes this more than a nicer `gh api`, and it is the demo that carries the whole tool. The review's real point — that a broad regex grammar mostly emits "not parsed" — is correct, so the feature is **narrowed to the two highest-frequency, highest-signal claims in LLM output: a star count near the mention, and an SPDX-ish licence token.** Everything else reports nothing at all rather than guessing. ~40 lines, not a grammar. If the narrowed version still mostly says "not parsed" on real input, it gets cut at `06-FILTER` — that is now a recorded falsifier, not a hope. |
 

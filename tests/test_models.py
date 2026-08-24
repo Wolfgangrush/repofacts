@@ -1,7 +1,7 @@
 """Tests for repofacts.models — dataclass defaults, invariants, purity.
 
-Drafted by the review against the module source, reviewed and consolidated by
-the maintainer (per the model-separation rule).
+Drafted against the module source, then reviewed and consolidated independently
+of the implementation, per the project's model-separation rule.
 
 These guard the load-bearing invariants of the data layer:
 

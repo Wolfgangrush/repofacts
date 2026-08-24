@@ -1,4 +1,4 @@
-"""the maintainer-authored tests for the install/conflict simulation."""
+"""Tests for the install/conflict simulation."""
 from __future__ import annotations
 import sys
 from pathlib import Path

@@ -94,7 +94,6 @@ def test_discover_token_full_priority_chain(monkeypatch):
     b = "ghp_" + "b" * 36
     c = "ghp_" + "c" * 36
     d = "ghp_" + "d" * 36
-    e = "ghp_" + "e" * 36
     f = "ghp_" + "f" * 36
 
     # 1. token_env override beats everything else.

@@ -1,6 +1,6 @@
 # 04 — BMAD SPEC · repofacts
 
-**Status:** pre-code · 2026-08-24 · name locked by the owner 14:04 IST
+**Status:** pre-code · 2026-08-24 · name locked 2026-08-24
 
 ## B — BUILD
 
@@ -22,7 +22,7 @@ Full design in `02`; the outline that must stay in context is `03`.
 | runtime dependencies | **0** |
 
 The acceptance corpus is not invented: the three lists, and the human verdicts on them, are already
-recorded in `the publisher's build log`.
+recorded in the publisher's build log.
 
 ## A — ANALYZE
 
@@ -41,7 +41,7 @@ recorded in `the publisher's build log`.
    are wrong and get redesigned, not patched.
 2. **`--claims` reports "not parsed" on more than half of real LLM star/licence claims.** This is the
    recorded falsifier from the Phase-3 disagreement: the review argued the feature should be cut before
-   any code; the maintainer held it, narrowed. If this fires at `06-FILTER`, **the feature is cut** — the
+   any code; it was held and narrowed instead. If this fires at `06-FILTER`, **the feature is cut** — the
    disagreement is settled by evidence, not by whoever argued last.
 3. **A 20-repo authenticated run cannot finish inside the rate budget.** Then calls-per-repo is wrong
    and the README/licence probes need rethinking, not more workers.
@@ -82,13 +82,14 @@ with reasons**, never left blank.)*
 
 - **BMAD-new**, not a bug fix.
 - **Egress: NOT sensitive** — public repo metadata only. Cloud delegates permitted.
-- **Codegen:** an independent review (live-probed `PROBE-UP` 2026-08-24 14:05) in a watchable pane.
-- **Tests:** authored by the maintainer, per `the model-separation rule`.
+- **Codegen:** delegated to a separate model from the one that authored the tests, in a watchable pane.
+- **Tests:** authored independently of the implementation, per the project's model-separation rule.
 - **Independent review:** seat **VACANT** since codex died 2026-08-17. `alibaba/open-code-review` is
   the candidate successor and this is its obvious first real job — **the owner's call, not the router's.**
 
 ## BUILD IS NOT PUSH
 
 `SHIP` in D will mean the code is done and the gates are answered. It will **not** mean pushed.
-Publishing needs a separate explicit gate from the owner plus the **publication firewall** — cheap here, since
-the tool contains no client data, no internal references, and no private identifiers, but **not waived**.
+Publishing needs a separate explicit gate from the owner plus the **publication firewall** — which
+was run, not waived. It found and removed private identifiers and internal references from these
+BMAD documents and from three test-file docstrings before the public flip.

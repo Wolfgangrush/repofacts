@@ -9,7 +9,7 @@
 - Zero deps means `uv tool install repofacts` or `pipx install repofacts` works instantly with no
   resolution, no lockfile, no supply chain of its own. **A tool whose subject is dependency risk must
   not itself be a dependency risk.** That is the argument, and it is not decorative.
-- Python keeps the contribution barrier low and matches the rest of the owner's tooling.
+- Python keeps the contribution barrier low and matches the rest of the publisher's tooling.
 - `http.client` · `json` · `re` · `argparse` · `concurrent.futures` · `datetime` · `gzip` · `subprocess`
   (token discovery only) are sufficient for every requirement in `01`.
 - **`http.client.HTTPSConnection`, not `urllib.request`** — one persistent keep-alive connection per
@@ -29,6 +29,15 @@ burden for a tool this small. Node — a dependency tree is exactly the thing th
 | `claims.py` | conservative claim extraction + diff against facts | no — **pure** |
 | `render.py` | table · summary line · `--json` · `--markdown` | no |
 | `cli.py` | argparse, orchestration, exit codes | no |
+| `models.py` | every dataclass crossing a module boundary; `DeepFacts` is the single deep-battery input, with `SecurityFacts` / `QualityFacts` as aliases of it | no |
+| `security.py` | pure security assessor over `DeepFacts` | no — **pure** |
+| `quality.py` | pure quality assessor over `DeepFacts` | no — **pure** |
+| `simulate.py` | install / conflict simulation over declared manifests | no — **pure** |
+
+> **Amended at `06-FILTER` (2026-08-25).** The four rows above were added by the scope
+> expansion authorised in `01-PRD.md` but were never recorded here, so the table described a
+> six-module tool that no longer existed. The code was right and this document was stale;
+> per `06-FILTER` Pass 2 the document is what changed.
 
 **All network access is confined to `github.py`.** `rules.py` and `claims.py` are pure functions over
 plain data, so the entire decision layer is unit-testable offline with fixtures. This is the single

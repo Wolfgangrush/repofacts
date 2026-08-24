@@ -261,11 +261,13 @@ def test_renderers_receive_none_deep(wire_one_repo, monkeypatch):
         seen["summary"] = deep_by_full
         return real_summary(assessments, skips, deep_by_full=deep_by_full)
 
-    def spy_json(assessments, skips, licence_as_of, *, partial=False, token_source="none", deep_by_full=None):
+    def spy_json(assessments, skips, licence_as_of, *, partial=False, token_source="none",
+                 deep_by_full=None, **kwargs):
         seen["json"] = deep_by_full
         return real_json(
             assessments, skips, licence_as_of,
             partial=partial, token_source=token_source, deep_by_full=deep_by_full,
+            **kwargs,
         )
 
     def spy_md(assessments, skips, licence_as_of, *, deep_by_full=None):
@@ -506,11 +508,12 @@ def test_deep_flag_runs_battery_and_never_reports_a_pass_it_did_not_earn(
     real_json = cli.format_json
 
     def spy_json(assessments, skips, licence_as_of, *, partial=False,
-                 token_source="none", deep_by_full=None):
+                 token_source="none", deep_by_full=None, **kwargs):
         seen["deep_by_full"] = deep_by_full
         return real_json(
             assessments, skips, licence_as_of,
             partial=partial, token_source=token_source, deep_by_full=deep_by_full,
+            **kwargs,
         )
 
     monkeypatch.setattr(cli, "format_json", spy_json)

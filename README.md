@@ -112,7 +112,8 @@ Full check list:
 - **Security** — BranchProtection, SecurityPolicy, SignedReleases, DangerousWorkflow, TokenPermissions, PinnedDependencies, BinaryArtifacts, Contributors, DependencyUpdateTool, InstallTimeExecution, Maintained
 - **Quality** — TestsPresent, CIConfigured, CIStatus, Documentation, ReleaseCadence, SemVerAdherence, Changelog, IssueResponsiveness, ContributorConcentration, DependencyWeight
 - **Install simulation** — declared dependency count, surface size, install-time execution, unpinned versions, typosquat proximity
-- **Conflict simulation** — version clashes against packages you already have, and how much new transitive surface you'd take on
+- **Conflict simulation** — how much new transitive surface you'd take on, and duplicate-purpose
+  warnings across the declared set
 
 ## Install
 
@@ -186,8 +187,14 @@ The token value is never printed. Only the name of where it came from.
 - **`--claims` can mis-attribute.** It attaches a claim to any repo mentioned within two lines of it, so in a dense numbered list one star count may be reported against several repos. Check the line number in the reason column before acting on a claim diff.
 - **The `skipped:` list is noisy.** It errs toward showing you candidate package names, so common words like `install` and `client` turn up there too.
 - **GitHub only.** No GitLab, no Bitbucket, no PyPI or npm registry lookups.
+- **Conflict simulation does not yet read your environment.** It reports the new surface a repo
+  would add, but it does not know which packages you already have installed, so the
+  "version conflicts" line is always `0`. The comparison engine exists and is tested; what is
+  missing is the host-inspection step that would feed it. Treat that line as not-yet-implemented
+  rather than as a clean bill of health.
 - **Bare `owner/repo` in prose is ignored** unless you pass `--loose`, because `and/or` and `24/08` look identical to a repo reference.
 
 ## Status
 
-Version 0.1.0. 267 tests pass. Not published to PyPI, not yet on GitHub.
+Version 0.1.0. 275 tests pass, lint clean, zero runtime dependencies. On GitHub; not published
+to PyPI.

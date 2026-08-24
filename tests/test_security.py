@@ -1,7 +1,7 @@
 """Tests for the pure security assessor (``repofacts.security``).
 
-Per the model-separation rule: the review drafted, the maintainer
-curated and owns every assertion here.
+Per the project's model-separation rule, the implementation's author did not
+write these; every assertion here is independently owned.
 
 The load-bearing invariant of this module is the same one ``rules.py`` has
 for ``platform_check``: **a check that could not run must never render like

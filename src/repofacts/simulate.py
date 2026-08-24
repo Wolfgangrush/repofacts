@@ -496,6 +496,49 @@ def _parse_setup_py(filename: str, body: str, sim: InstallSimulation) -> None:
             ))
 
 
+def _ingest_pypi_dep_entries(
+    filename: str,
+    body: str,
+    entries: list,
+    label: str,
+    sim: InstallSimulation,
+) -> None:
+    """Ingest one list of PEP 508 requirement strings into ``sim``.
+
+    Shared by ``[project.dependencies]`` and by every group under
+    ``[project.optional-dependencies]``. ``label`` only changes the wording
+    of the ``unparsed`` note ("dep" vs "opt-dep"); the parsing, the
+    ``declared`` record and the floating-spec classification are identical,
+    which is why they live here once instead of twice.
+    """
+    for entry in entries:
+        if not isinstance(entry, str):
+            continue
+        m = re.match(r"^([A-Za-z0-9_.\-]+)\s*([<>=!~].*)?$", entry)
+        if not m:
+            sim.unparsed.append(f"{filename}: could not parse {label} {entry!r}")
+            continue
+        name = m.group(1)
+        spec = (m.group(2) or "").strip() or "any"
+        offset = body.find(entry)
+        sim.declared.append(DeclaredDep(
+            ecosystem="pypi",
+            name=name,
+            spec=spec,
+            source=filename,
+            line_no=_line_of(body, offset) if offset >= 0 else None,
+        ))
+        reason = _classify_floating(spec) if spec != "any" else "missing"
+        if reason is not None:
+            sim.floating.append(FloatingDep(
+                ecosystem="pypi",
+                name=name,
+                spec=spec if spec != "any" else "",
+                reason=reason,
+                source=filename,
+            ))
+
+
 def _parse_pyproject_toml(filename: str, body: str, sim: InstallSimulation) -> None:
     """Parse a pyproject.toml via stdlib tomllib (3.11+)."""
     try:
@@ -511,63 +554,13 @@ def _parse_pyproject_toml(filename: str, body: str, sim: InstallSimulation) -> N
     if isinstance(project, dict):
         deps = project.get("dependencies")
         if isinstance(deps, list):
-            for entry in deps:
-                if not isinstance(entry, str):
-                    continue
-                m = re.match(r"^([A-Za-z0-9_.\-]+)\s*([<>=!~].*)?$", entry)
-                if not m:
-                    sim.unparsed.append(f"{filename}: could not parse dep {entry!r}")
-                    continue
-                name = m.group(1)
-                spec = (m.group(2) or "").strip() or "any"
-                offset = body.find(entry)
-                sim.declared.append(DeclaredDep(
-                    ecosystem="pypi",
-                    name=name,
-                    spec=spec,
-                    source=filename,
-                    line_no=_line_of(body, offset) if offset >= 0 else None,
-                ))
-                reason = _classify_floating(spec) if spec != "any" else "missing"
-                if reason is not None:
-                    sim.floating.append(FloatingDep(
-                        ecosystem="pypi",
-                        name=name,
-                        spec=spec if spec != "any" else "",
-                        reason=reason,
-                        source=filename,
-                    ))
+            _ingest_pypi_dep_entries(filename, body, deps, "dep", sim)
         opt = project.get("optional-dependencies")
         if isinstance(opt, dict):
             for _group_name, group_deps in opt.items():
                 if not isinstance(group_deps, list):
                     continue
-                for entry in group_deps:
-                    if not isinstance(entry, str):
-                        continue
-                    m = re.match(r"^([A-Za-z0-9_.\-]+)\s*([<>=!~].*)?$", entry)
-                    if not m:
-                        sim.unparsed.append(f"{filename}: could not parse opt-dep {entry!r}")
-                        continue
-                    name = m.group(1)
-                    spec = (m.group(2) or "").strip() or "any"
-                    offset = body.find(entry)
-                    sim.declared.append(DeclaredDep(
-                        ecosystem="pypi",
-                        name=name,
-                        spec=spec,
-                        source=filename,
-                        line_no=_line_of(body, offset) if offset >= 0 else None,
-                    ))
-                    reason = _classify_floating(spec) if spec != "any" else "missing"
-                    if reason is not None:
-                        sim.floating.append(FloatingDep(
-                            ecosystem="pypi",
-                            name=name,
-                            spec=spec if spec != "any" else "",
-                            reason=reason,
-                            source=filename,
-                        ))
+                _ingest_pypi_dep_entries(filename, body, group_deps, "opt-dep", sim)
 
     build_system = data.get("build-system")
     if isinstance(build_system, dict):
@@ -964,8 +957,7 @@ def _spec_satisfies(spec: str, version: str) -> tuple[str, str]:
             # but we only support the simple Z-present form.
             if len(target) < 3:
                 return "unparsed", f"~= needs at least 3 version parts; got {raw_ver!r}"
-            ceil = target[:-1] + [target[-1] + 1] + [0] * (len(target) - 2)
-            # actually: ~=X.Y.Z -> >=X.Y.Z, <X.(Y+1).0  i.e. drop Z, bump Y.
+            # ~=X.Y.Z -> >=X.Y.Z, <X.(Y+1).0 — drop Z, bump Y.
             ceil = target[:-2] + [target[-2] + 1] + [0]
             ok = (
                 _cmp_versions(parsed_v, target) >= 0

@@ -24,13 +24,10 @@ import json
 import re
 import statistics
 from datetime import datetime, timezone
-from typing import Any
 
 from .models import (
     Finding,
-    QualityFacts,
     QualityReport,
-    SEV_HIGH,
     SEV_INFO,
     SEV_LOW,
     SEV_MED,

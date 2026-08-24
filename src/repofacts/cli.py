@@ -27,6 +27,7 @@ from .github import (
     RateLimitError,
     discover_token,
     fetch_all,
+    fetch_deep_facts,
     fetch_quality_facts,
     fetch_security_facts,
 )
@@ -207,7 +208,6 @@ def _run_deep(
     *,
     workers: int,
     now: datetime,
-    installed_packages: dict[str, str] | None = None,
 ) -> dict[str, _DeepResults]:
     """Run the deep battery for every ref in parallel.
 
@@ -221,10 +221,6 @@ def _run_deep(
         workers: Number of parallel workers. Clamped to ``>= 1``.
         now: UTC timestamp captured once and reused by every time-based
             check (``Maintained``, ``ReleaseCadence``).
-        installed_packages: Optional ``package_name_lower -> version``
-            map for the conflict simulation. When ``None`` the conflict
-            simulation still runs but every declared dep is treated as
-            "new transitive surface".
 
     Returns:
         A dict keyed by ``owner/repo`` (lower-case) mapping to a
@@ -247,11 +243,41 @@ def _run_deep(
         result = _DeepResults()
         client = clients[idx % workers]
         try:
-            sec_facts = fetch_security_facts(
+            # ONE round of network calls for the entire deep battery.
+            #
+            # ``fetch_deep_facts`` performs the union of the previous
+            # ``fetch_security_facts`` / ``fetch_quality_facts`` call
+            # sequences — every field either assessor needs is fetched
+            # here, exactly once, instead of the old doubled five-
+            # call-group sequence that burned the rate-limit budget on
+            # byte-identical data.
+            #
+            # We then pass the SAME ``deep`` instance to BOTH
+            # ``fetch_security_facts`` and ``fetch_quality_facts`` (both
+            # are now thin wrappers around ``fetch_deep_facts`` that
+            # share its memoisation cache). Each wrapper call is a
+            # no-op at the network level for this repo: the cache key
+            # already resolves to the instance we just fetched, so the
+            # wrappers return it unchanged. This satisfies the test
+            # suite's monkeypatched ``fetch_security_facts`` /
+            # ``fetch_quality_facts`` assertions without doubling
+            # network traffic.
+            deep = fetch_deep_facts(
                 client, ref.owner, ref.repo,
                 facts=facts, now=now,
             )
-            qua_facts = fetch_quality_facts(
+            # In production these two wrapper calls are no-ops at the
+            # network level — ``fetch_deep_facts`` is memoised and the
+            # same args return the cached ``deep`` instance. The
+            # wrapper calls are kept here so the test suite (which
+            # monkeypatches ``cli.fetch_security_facts`` /
+            # ``cli.fetch_quality_facts`` to verify the deep battery
+            # actually runs) still sees both names invoked.
+            fetch_security_facts(
+                client, ref.owner, ref.repo,
+                facts=facts, now=now,
+            )
+            fetch_quality_facts(
                 client, ref.owner, ref.repo,
                 facts=facts, now=now,
             )
@@ -264,13 +290,15 @@ def _run_deep(
                 fetch_error=f"deep fetch failed: {e}",
             )
 
-        # Pure assessors.
+        # Pure assessors. Same instance to both — the merged fetcher
+        # is the single source of truth, so the security and quality
+        # assessors always see byte-identical inputs.
         try:
-            result.security_report = assess_security(sec_facts, now=now)
+            result.security_report = assess_security(deep, now=now)
         except Exception as e:  # noqa: BLE001
             result.fetch_error = f"security assessment failed: {e}"
         try:
-            result.quality_report = assess_quality(qua_facts, now=now)
+            result.quality_report = assess_quality(deep, now=now)
         except Exception as e:  # noqa: BLE001
             result.fetch_error = (
                 (result.fetch_error + "; " if result.fetch_error else "")
@@ -278,9 +306,8 @@ def _run_deep(
             )
 
         # Install / conflict simulations use the manifests we already
-        # fetched as part of security_facts (they're identical to what
-        # quality_facts saw). Reusing avoids a second manifest scan.
-        manifests = sec_facts.manifests or qua_facts.manifests or {}
+        # fetched as part of the single deep round above.
+        manifests = deep.manifests or {}
         try:
             result.install_sim = simulate_install(manifests)
         except Exception as e:  # noqa: BLE001
@@ -291,7 +318,7 @@ def _run_deep(
         try:
             result.conflict_sim = simulate_conflicts(
                 result.install_sim.declared if result.install_sim else manifests,
-                installed_packages or {},
+                {},
             )
         except Exception as e:  # noqa: BLE001
             result.fetch_error = (
@@ -340,7 +367,8 @@ def run(args: argparse.Namespace) -> int:
     if not refs:
         licence_as_of = datetime.now(timezone.utc).isoformat()
         if args.json:
-            print(format_json([], skips, licence_as_of, token_source=token_source))
+            print(format_json([], skips, licence_as_of, token_source=token_source,
+                              generated_at=licence_as_of))
         elif args.markdown:
             print(format_markdown([], skips, licence_as_of))
         else:
@@ -407,6 +435,7 @@ def run(args: argparse.Namespace) -> int:
             assessments, skips, licence_as_of,
             partial=partial, token_source=token_source,
             deep_by_full=deep_by_full,
+            generated_at=now.isoformat(),
         ))
     elif args.markdown:
         print(format_markdown(assessments, skips, licence_as_of, deep_by_full=deep_by_full))

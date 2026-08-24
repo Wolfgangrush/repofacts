@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests · py${{ matrix.python-version }} · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # repofacts itself has ZERO runtime dependencies. pytest is the only
+      # thing installed here, and it is pinned so CI cannot drift from local.
+      - name: Install pytest (pinned)
+        run: python -m pip install --disable-pip-version-check pytest==9.0.2
+      - name: Run tests
+        run: python -m pytest -q
+
+  lint:
+    name: lint · ruff (pinned)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Pinned to the exact version used locally, so a ruff release can never
+      # turn a green branch red without a deliberate bump in this file.
+      - name: Install ruff (pinned)
+        run: python -m pip install --disable-pip-version-check ruff==0.15.22
+      - name: Lint
+        run: ruff check .
+
+  zero-deps:
+    name: guard · zero runtime dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # The load-bearing promise of this tool is that it has no supply chain
+      # of its own. This job fails the build if a dependency ever appears.
+      - name: Assert dependencies list is empty
+        run: |
+          python - <<'PY'
+          import sys, tomllib, pathlib
+          data = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
+          deps = data["project"].get("dependencies") or []
+          if deps:
+              sys.exit(f"repofacts must have zero runtime dependencies; found: {deps}")
+          print("zero runtime dependencies — promise intact")
+          PY
+      - name: Import the package with nothing else installed
+        run: python -c "import sys; sys.path.insert(0,'src'); import repofacts.cli; print('import ok')"

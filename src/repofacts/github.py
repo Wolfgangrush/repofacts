@@ -29,7 +29,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from .models import QualityFacts, RepoFacts, RepoRef, SecurityFacts
+from .models import DeepFacts, QualityFacts, RepoFacts, RepoRef, SecurityFacts
 
 
 GITHUB_API_HOST = "api.github.com"
@@ -195,14 +195,6 @@ class _Headers(dict):
         return super().__contains__(key)
 
 
-class _KeepAliveHTTPSConnection(http.client.HTTPSConnection):
-    """Subclass that records the response object so we can read headers later.
-
-    ``http.client.HTTPSConnection`` is *not* thread-safe; each worker owns
-    its own instance, never shared across threads.
-    """
-
-
 class GitHubClient:
     """A small GitHub REST client using a persistent HTTPS connection.
 
@@ -247,7 +239,9 @@ class GitHubClient:
 
     def _connect(self) -> http.client.HTTPSConnection:
         if self._conn is None:
-            self._conn = _KeepAliveHTTPSConnection(self._host, timeout=self._timeout)
+            # Not thread-safe: each worker owns its own connection and never
+            # shares it across threads.
+            self._conn = http.client.HTTPSConnection(self._host, timeout=self._timeout)
         return self._conn
 
     def _headers(self, extra: dict | None = None) -> dict:
@@ -577,12 +571,6 @@ def fetch_all(
             c.close()
         raise RuntimeError(msg)
 
-    if msg:
-        # Probe failed but we can still try — caller (cli.py) decides
-        # whether to surface this. The signal travels back with the
-        # ``partial``-like flag attached to the first fact.
-        pass
-
     results: list[RepoFacts | None] = [None] * len(refs)
     rate_limited = threading.Event()
     rate_limit_msg = ""
@@ -646,11 +634,6 @@ def fetch_all(
             final.append(r)
 
     partial = rate_limited.is_set()
-    if partial:
-        # Surface the rate-limit message via ``error`` on each untouched fact.
-        # Pure renderers shouldn't read this; cli.py handles the warning.
-        pass
-
     return final, partial
 
 
@@ -684,12 +667,6 @@ _MANIFEST_BASENAMES = (
     "package.json", "pyproject.toml", "setup.py", "requirements.txt",
     "Cargo.toml", "go.mod",
 )
-
-# File extensions that count as binary artifacts.
-_BINARY_EXTENSIONS = (
-    ".exe", ".dll", ".so", ".dylib", ".jar", ".whl",
-)
-
 
 def _default_branch_of(
     client: GitHubClient, owner: str, repo: str, fallback: str | None = None
@@ -1268,6 +1245,184 @@ def _fetch_issue_response_hours(
 
 
 # ----- Aggregate deep fetchers --------------------------------------------
+#
+# ``fetch_deep_facts`` is the single round-tripped fetcher for the entire
+# deep battery: the security assessor's checks AND the quality assessor's
+# checks, fetched at most once per (client, owner, repo, facts, now).
+#
+# ``fetch_security_facts`` and ``fetch_quality_facts`` are thin wrappers
+# around it — kept exported because tests monkeypatch them at the cli
+# level. Memoisation is internal to ``fetch_deep_facts``: the two
+# wrappers, called back-to-back by ``cli._run_deep``, hand back the same
+# cached instance, so only ONE round of network calls happens per repo
+# (down from two before the merge).
+#
+# Memoisation key is ``(id(client), owner, repo, id(facts) or 0, now)``:
+# every worker in a parallel run has its own ``GitHubClient`` instance
+# (so id collisions across workers cannot happen), every ``RepoFacts``
+# is the unique output of ``fetch_all`` for one repo, and ``now`` is a
+# single UTC datetime captured once per ``run()`` invocation. The cache
+# lives only for the duration of one CLI run — never across runs.
+_DEEP_FACTS_CACHE: dict = {}
+
+
+def fetch_deep_facts(
+    client: GitHubClient,
+    owner: str,
+    repo: str,
+    *,
+    facts: RepoFacts | None = None,
+    now: datetime | None = None,
+) -> DeepFacts:
+    """Fetch everything the security AND quality assessors need — once.
+
+    Performs the **union** of the call sequences the two previous
+    fetchers ran, with no duplicates: ``/repos/{owner}/{repo}`` (only if
+    no ``facts`` was supplied), ``/releases``, ``/git/trees``, ``/contributors``,
+    ``/stats/commit_activity``, ``/branches/{branch}/protection``,
+    ``/contents/.github/workflows`` (listing + each file), manifest
+    ``/contents/`` reads, dependabot / renovate / SECURITY.md /
+    CHANGELOG.md / ``/tags`` / ``/commits`` / ``/git/ref/heads/{branch}``
+    / ``/commits/{sha}/check-runs`` / ``/issues`` (+ ``/issues/{n}/comments``
+    per issue), and the README-length derivation from the existing facts.
+
+    Order is the union of the two previous sequences, with the
+    quality-battery's ``head_sha`` / ``check-runs`` fetch (which the
+    security sequence did not include) preserved.
+
+    Args:
+        client: A :class:`GitHubClient` (one connection per worker).
+        owner: GitHub owner.
+        repo: GitHub repo name.
+        facts: An existing :class:`RepoFacts` from
+            :func:`fetch_repo_metadata` / :func:`fetch_all`. If supplied,
+            we skip re-fetching ``/repos/{owner}/{repo}`` to avoid
+            burning rate-limit on the default branch. Optional.
+        now: UTC timestamp to record as ``fetched_at``. Defaults to
+            ``datetime.now(timezone.utc)`` here. In a normal run ``cli``
+            captures the clock once and passes it down, so every module below
+            it stays a pure function of the timestamp it is handed.
+
+    Returns:
+        A :class:`DeepFacts` instance (the security and quality
+        assessors' input). Every field is populated to the best of the
+        fetcher's ability; a field that remains ``None`` / empty means
+        the data was not obtainable, which the pure assessors map to
+        ``unchecked`` — never to ``pass``.
+
+    Notes:
+        Memoised: a second call with the same args returns the cached
+        instance. ``fetch_security_facts`` and ``fetch_quality_facts``
+        rely on this to avoid doubling the network traffic when both
+        are called for one repo.
+    """
+    cache_key = (
+        id(client),
+        owner,
+        repo,
+        id(facts) if facts is not None else 0,
+        now,
+    )
+    cached = _DEEP_FACTS_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    deep = DeepFacts(
+        owner=owner, repo=repo,
+        fetched_at=now or datetime.now(timezone.utc),
+    )
+    try:
+        # Default branch — reuse the existing facts if provided.
+        if facts is not None and isinstance(getattr(facts, "default_branch", None), str):
+            deep.default_branch = facts.default_branch
+        else:
+            deep.default_branch = _default_branch_of(client, owner, repo)
+
+        # --- security-specific fetches ---------------------------------
+
+        # SECURITY.md presence.
+        deep.has_security_policy = _fetch_security_policy(client, owner, repo)
+
+        # Branch protection on the default branch.
+        if deep.default_branch:
+            deep.branch_protection = _fetch_branch_protection(
+                client, owner, repo, deep.default_branch
+            )
+
+        # 52-week commit activity.
+        deep.commit_activity_weeks = _fetch_commit_activity(client, owner, repo)
+
+        # Dependabot / renovate presence.
+        deep.has_dependabot_config, deep.has_renovate_config = (
+            _fetch_dependency_update_configs(client, owner, repo)
+        )
+
+        # --- shared fetches (same data, same semantics) ----------------
+
+        # Recent releases.
+        deep.releases = _fetch_releases(client, owner, repo)
+
+        # Repo tree (top 2 levels).
+        deep.tree_entries = _fetch_tree_top_levels(
+            client, owner, repo, deep.default_branch
+        )
+
+        # Workflow files (paths + contents).
+        deep.workflow_paths = _list_workflow_paths(client, owner, repo)
+        deep.workflow_files = _fetch_workflow_contents(
+            client, owner, repo, deep.workflow_paths,
+        )
+
+        # Contributors. Always fetched: the quality assessor's
+        # ``_check_contributor_concentration`` falls back to the
+        # ``/contributors`` aggregate only when ``recent_commits`` is
+        # empty, so a populated ``contributors`` is harmless when
+        # ``recent_commits`` is also populated, and necessary when it
+        # isn't. The security assessor's ``_check_contributors``
+        # always needs this.
+        deep.contributors = _fetch_contributors(client, owner, repo)
+
+        # Manifest files (capped by tree depth).
+        deep.manifests = _fetch_manifest_contents(
+            client, owner, repo, deep.tree_entries,
+        )
+
+        # --- quality-specific fetches ---------------------------------
+
+        # Tags.
+        deep.tags = _fetch_tags(client, owner, repo)
+
+        # CHANGELOG.md presence.
+        deep.has_changelog = _fetch_changelog_presence(client, owner, repo)
+
+        # Recent commits on the default branch.
+        deep.recent_commits = _fetch_recent_commits(client, owner, repo)
+
+        # Issue responsiveness — bounded.
+        deep.issue_response_hours = _fetch_issue_response_hours(
+            client, owner, repo,
+        )
+
+        # README length (reuse from facts if available — already paid
+        # for by the fast path).
+        if facts is not None and isinstance(getattr(facts, "readme_text", None), str):
+            deep.readme_length = len(facts.readme_text)
+
+        # Check-runs: needs the HEAD SHA on the default branch.
+        deep.head_sha = _fetch_head_sha(client, owner, repo, deep.default_branch)
+        if deep.head_sha:
+            deep.latest_check_conclusion = _fetch_check_runs(
+                client, owner, repo, deep.head_sha,
+            )
+    except RateLimitError as e:
+        deep.error = f"rate limited; reset={e.reset}"
+    except HTTPStatusError as e:
+        deep.error = f"http {e.status}"
+    except Exception as e:
+        deep.error = f"deep fetch failed: {e}"
+
+    _DEEP_FACTS_CACHE[cache_key] = deep
+    return deep
 
 
 def fetch_security_facts(
@@ -1278,76 +1433,15 @@ def fetch_security_facts(
     facts: RepoFacts | None = None,
     now: datetime | None = None,
 ) -> SecurityFacts:
-    """Fetch everything the security assessor needs.
+    """Thin wrapper around :func:`fetch_deep_facts`.
 
-    Args:
-        client: A :class:`GitHubClient` (one connection per worker).
-        owner: GitHub owner.
-        repo: GitHub repo name.
-        facts: An existing :class:`RepoFacts` from :func:`fetch_repo_metadata`.
-            If supplied, we skip re-fetching ``/repos/{owner}/{repo}`` to
-            avoid burning rate-limit on the default branch. Optional.
-        now: UTC timestamp to record as ``fetched_at``. Defaults to
-            ``datetime.now(timezone.utc)`` here (this module is allowed
-            to read the clock).
-
-    Returns:
-        A :class:`SecurityFacts` dataclass. Every field is populated to
-        the best of the fetcher's ability; a field that remains ``None``
-        / empty means the data was not obtainable, which the pure
-        assessor maps to ``unchecked``.
+    Kept exported because the test suite (and any external caller)
+    references it. Internally delegates to :func:`fetch_deep_facts`,
+    which is memoised, so calling this AND
+    :func:`fetch_quality_facts` for the same ``(client, owner, repo,
+    facts, now)`` still triggers only one round of API calls.
     """
-    sec = SecurityFacts(owner=owner, repo=repo, fetched_at=now or datetime.now(timezone.utc))
-    try:
-        # Default branch — reuse the existing facts if provided.
-        if facts is not None and isinstance(getattr(facts, "default_branch", None), str):
-            sec.default_branch = facts.default_branch
-        else:
-            sec.default_branch = _default_branch_of(client, owner, repo)
-
-        # Security policy presence.
-        sec.has_security_policy = _fetch_security_policy(client, owner, repo)
-
-        # Branch protection on the default branch.
-        if sec.default_branch:
-            sec.branch_protection = _fetch_branch_protection(
-                client, owner, repo, sec.default_branch
-            )
-
-        # Recent releases.
-        sec.releases = _fetch_releases(client, owner, repo)
-
-        # Repo tree (top 2 levels).
-        sec.tree_entries = _fetch_tree_top_levels(
-            client, owner, repo, sec.default_branch
-        )
-
-        # Workflow files (paths + contents).
-        wf_paths = _list_workflow_paths(client, owner, repo)
-        sec.workflow_files = _fetch_workflow_contents(client, owner, repo, wf_paths)
-
-        # Contributors.
-        sec.contributors = _fetch_contributors(client, owner, repo)
-
-        # 52-week commit activity.
-        sec.commit_activity_weeks = _fetch_commit_activity(client, owner, repo)
-
-        # Dependabot / renovate presence.
-        sec.has_dependabot_config, sec.has_renovate_config = (
-            _fetch_dependency_update_configs(client, owner, repo)
-        )
-
-        # Manifest files (capped by tree depth).
-        sec.manifests = _fetch_manifest_contents(
-            client, owner, repo, sec.tree_entries
-        )
-    except RateLimitError as e:
-        sec.error = f"rate limited; reset={e.reset}"
-    except HTTPStatusError as e:
-        sec.error = f"http {e.status}"
-    except Exception as e:
-        sec.error = f"security fetch failed: {e}"
-    return sec
+    return fetch_deep_facts(client, owner, repo, facts=facts, now=now)
 
 
 def fetch_quality_facts(
@@ -1358,75 +1452,11 @@ def fetch_quality_facts(
     facts: RepoFacts | None = None,
     now: datetime | None = None,
 ) -> QualityFacts:
-    """Fetch everything the quality assessor needs.
+    """Thin wrapper around :func:`fetch_deep_facts`.
 
-    Args:
-        client: A :class:`GitHubClient` (one connection per worker).
-        owner: GitHub owner.
-        repo: GitHub repo name.
-        facts: An existing :class:`RepoFacts` from :func:`fetch_repo_metadata`.
-            If supplied, we skip re-fetching ``/repos/{owner}/{repo}``.
-        now: UTC timestamp to record as ``fetched_at``. Defaults to
-            ``datetime.now(timezone.utc)``.
-
-    Returns:
-        A :class:`QualityFacts` dataclass. Same ``None`` / empty
-        contract as :func:`fetch_security_facts`.
+    Kept exported because the test suite (and any external caller)
+    references it. See :func:`fetch_security_facts` for the memoisation
+    contract that prevents doubling the network traffic.
     """
-    q = QualityFacts(owner=owner, repo=repo, fetched_at=now or datetime.now(timezone.utc))
-    try:
-        if facts is not None and isinstance(getattr(facts, "default_branch", None), str):
-            q.default_branch = facts.default_branch
-        else:
-            q.default_branch = _default_branch_of(client, owner, repo)
-
-        # Workflows.
-        q.workflow_paths = _list_workflow_paths(client, owner, repo)
-        q.workflow_files = _fetch_workflow_contents(client, owner, repo, q.workflow_paths)
-
-        # Tree (top 2 levels).
-        q.tree_entries = _fetch_tree_top_levels(
-            client, owner, repo, q.default_branch
-        )
-
-        # Releases + tags.
-        q.releases = _fetch_releases(client, owner, repo)
-        q.tags = _fetch_tags(client, owner, repo)
-
-        # Changelog presence.
-        q.has_changelog = _fetch_changelog_presence(client, owner, repo)
-
-        # Manifests.
-        q.manifests = _fetch_manifest_contents(
-            client, owner, repo, q.tree_entries
-        )
-
-        # Contributor concentration — recent commits first, fallback to
-        # ``/contributors`` aggregate.
-        q.recent_commits = _fetch_recent_commits(client, owner, repo)
-        if not q.recent_commits:
-            q.contributors = _fetch_contributors(client, owner, repo)
-
-        # Issue responsiveness — bounded.
-        q.issue_response_hours = _fetch_issue_response_hours(
-            client, owner, repo
-        )
-
-        # README length (reuse from facts if available).
-        if facts is not None and isinstance(getattr(facts, "readme_text", None), str):
-            q.readme_length = len(facts.readme_text)
-
-        # Check-runs: needs the HEAD SHA on the default branch.
-        q.head_sha = _fetch_head_sha(client, owner, repo, q.default_branch)
-        if q.head_sha:
-            q.latest_check_conclusion = _fetch_check_runs(
-                client, owner, repo, q.head_sha
-            )
-    except RateLimitError as e:
-        q.error = f"rate limited; reset={e.reset}"
-    except HTTPStatusError as e:
-        q.error = f"http {e.status}"
-    except Exception as e:
-        q.error = f"quality fetch failed: {e}"
-    return q
+    return fetch_deep_facts(client, owner, repo, facts=facts, now=now)
 
