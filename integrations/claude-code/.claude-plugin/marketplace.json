@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-marketplace",
+  "name": "repofacts",
+  "description": "repofacts — verify the GitHub repos an AI recommended, before you trust or install them. Checks existence (models hallucinate repo names and attackers register them), real star count versus how confidently it was recommended, whether the licence grants any rights, maintenance, platform fitness, security posture, project quality, and what installing it would actually pull in.",
+  "version": "0.1.0",
+  "owner": { "name": "Wolfgang Rush" },
+  "plugins": [
+    {
+      "name": "repofacts",
+      "source": { "source": "url", "url": "https://github.com/Wolfgangrush/repofacts.git" },
+      "description": "Verify AI-recommended GitHub repos: real, licensed, alive, runnable, safe.",
+      "category": "developer-tools",
+      "tags": ["security", "supply-chain", "verification", "slopsquatting", "dependencies"]
+    }
+  ]
+}

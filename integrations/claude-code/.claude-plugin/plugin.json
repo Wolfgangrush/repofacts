@@ -1,0 +1,6 @@
+{
+  "name": "repofacts",
+  "description": "Verify the GitHub repos an AI recommended: real, licensed, alive, runnable, safe.",
+  "version": "0.1.0",
+  "author": { "name": "Wolfgang Rush" }
+}

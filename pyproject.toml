@@ -1,0 +1,13 @@
+[project]
+name = "repofacts"
+version = "0.1.0"
+description = "Verify the GitHub repos an AI recommended: real, licensed, alive, runnable."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+repofacts = "repofacts.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
